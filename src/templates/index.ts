@@ -1,5 +1,5 @@
 import { DECOR_BY_ID, defaultParams } from '../decor/registry'
-import type { DecorInstance, Venue } from '../types'
+import type { DecorInstance, Space, Venue } from '../types'
 
 export interface Template {
   id: string
@@ -100,4 +100,18 @@ export function instantiate(template: Template): DecorInstance[] {
       params: def ? { ...defaultParams(def), ...spec.params } : { ...spec.params },
     }
   })
+}
+
+/** A template becomes a fully-formed space, ready to drop into a project. */
+export function templateSpace(template: Template): Space {
+  return {
+    id: crypto.randomUUID(),
+    name: template.label,
+    venue: { ...template.venue },
+    pins: [],
+    items: instantiate(template),
+    // Templates ship with real-world dimensions already set.
+    calibrated: true,
+    lighting: template.id === 'haldi-lawn' ? 'day' : 'evening',
+  }
 }

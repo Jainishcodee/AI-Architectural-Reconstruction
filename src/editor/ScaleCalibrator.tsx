@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 import { fromFeet, toFeet } from '../types'
 import { Button, Hint, SelectField } from './ui'
 
@@ -20,9 +20,9 @@ const LABELS: Record<Ref, string> = {
  * the user already dialled in.
  */
 export function ScaleCalibrator({ onClose }: { onClose: () => void }) {
-  const venue = useScene((s) => s.venue)
+  const venue = useActiveSpace((s) => s.venue)
   const applyCalibration = useScene((s) => s.applyCalibration)
-  const calibrated = useScene((s) => s.calibrated)
+  const calibrated = useActiveSpace((s) => s.calibrated)
   const [ref, setRef] = useState<Ref>('width')
   const [feet, setFeet] = useState(() => toFeet(venue.width).toFixed(0))
 

@@ -4,8 +4,10 @@ import { cloneQuad, FULL_FRAME } from '../lib/homography'
 import type {
   CorrectionEvent,
   DecorInstance,
+  LightingPreset,
   PhotoAsset,
   PhotoPin,
+  Space,
   SurfaceId,
   Vec2,
   Vec3,
@@ -13,33 +15,42 @@ import type {
   VenueMode,
 } from '../types'
 
-export type LightingPreset = 'day' | 'golden' | 'evening' | 'night'
+export type { LightingPreset }
 export type CameraMode = 'orbit' | 'walk'
 
 interface SceneState {
-  venue: Venue
+  /** A project is one or more independent spaces. See `Space` in types.ts. */
+  spaces: Space[]
+  activeSpaceId: string
+
+  /** Shared across every space, so a prop cutout can be reused anywhere. */
   photos: PhotoAsset[]
-  pins: PhotoPin[]
-  items: DecorInstance[]
 
   selectedItemId: string | null
   editingPinId: string | null
-  lighting: LightingPreset
   cameraMode: CameraMode
-
-  /**
-   * Set once the user calibrates against a known real-world length. Decor
-   * placement is blocked until then — an uncalibrated scene produces a
-   * confident, wrong bill of materials, which is worse than no BOM at all.
-   */
-  calibrated: boolean
+  presenting: boolean
 
   /** Training data for the correction flywheel. Logged now, trained on later. */
   corrections: CorrectionEvent[]
 
+  /**
+   * Bumped whenever the viewed geometry is swapped wholesale — project load or
+   * a space switch. The camera refits on change, so moving from a 26 ft
+   * birthday room to a 52 ft banquet hall does not leave the user in a wall.
+   */
+  epoch: number
+
+  setPresenting: (on: boolean) => void
+
+  addSpace: (name?: string) => void
+  removeSpace: (id: string) => void
+  renameSpace: (id: string, name: string) => void
+  setActiveSpace: (id: string) => void
+  duplicateSpace: (id: string) => void
+
   setVenueMode: (mode: VenueMode) => void
   setVenueSize: (dims: Partial<Pick<Venue, 'width' | 'depth' | 'height'>>) => void
-  /** Uniformly rescale the room so a measured span equals its real length. */
   applyCalibration: (measured: number, actual: number) => void
 
   addPhoto: (photo: PhotoAsset) => void
@@ -64,215 +75,334 @@ interface SceneState {
 }
 
 export interface ProjectSnapshot {
-  venue: Venue
+  spaces: Space[]
+  activeSpaceId: string
   photos: PhotoAsset[]
-  pins: PhotoPin[]
-  items: DecorInstance[]
-  calibrated: boolean
-  lighting: LightingPreset
   corrections: CorrectionEvent[]
 }
 
 /** Roughly a 40 x 30 x 13 ft hall — a plausible mid-size banquet space. */
-const DEFAULT_VENUE: Venue = {
-  mode: 'indoor',
-  width: 12,
-  depth: 9,
-  height: 4,
-}
+const DEFAULT_VENUE: Venue = { mode: 'indoor', width: 12, depth: 9, height: 4 }
 
 const uid = () => crypto.randomUUID()
 
+function makeSpace(name: string, venue: Venue = DEFAULT_VENUE): Space {
+  return {
+    id: uid(),
+    name,
+    venue: { ...venue },
+    pins: [],
+    items: [],
+    calibrated: false,
+    // Open bright: an empty room under the evening preset reads as a bug.
+    lighting: 'day',
+  }
+}
+
+const INDOOR_SURFACES: SurfaceId[] = ['floor', 'ceiling', 'north', 'south', 'east', 'west']
+const OUTDOOR_KEPT: SurfaceId[] = ['floor', 'north']
+
 export const useScene = create<SceneState>()(
   temporal(
-    (set, get) => ({
-      venue: { ...DEFAULT_VENUE },
-      photos: [],
-      pins: [],
-      items: [],
-      selectedItemId: null,
-      editingPinId: null,
-      // Open bright: an empty room under the evening preset reads as a bug.
-      lighting: 'day',
-      cameraMode: 'orbit',
-      calibrated: false,
-      corrections: [],
+    (set, get) => {
+      /** Apply a patch to the active space, leaving every other space alone. */
+      const patchActive = (fn: (space: Space) => Partial<Space>) =>
+        set((s) => ({
+          spaces: s.spaces.map((sp) => (sp.id === s.activeSpaceId ? { ...sp, ...fn(sp) } : sp)),
+        }))
 
-      setVenueMode: (mode) =>
-        set((s) => {
-          // Outdoor keeps only the ground and the backdrop; drop orphaned pins.
-          const kept: SurfaceId[] =
-            mode === 'outdoor' ? ['floor', 'north'] : [
-              'floor', 'ceiling', 'north', 'south', 'east', 'west',
-            ]
-          return {
-            venue: { ...s.venue, mode },
-            pins: s.pins.filter((p) => kept.includes(p.surface)),
-          }
-        }),
+      const active = () => {
+        const s = get()
+        return s.spaces.find((sp) => sp.id === s.activeSpaceId) ?? s.spaces[0]
+      }
 
-      setVenueSize: (dims) =>
-        set((s) => ({ venue: { ...s.venue, ...dims } })),
+      const first = makeSpace('Main hall')
 
-      applyCalibration: (measured, actual) =>
-        set((s) => {
-          if (measured <= 0 || actual <= 0) return s
+      return {
+        spaces: [first],
+        activeSpaceId: first.id,
+        photos: [],
+        selectedItemId: null,
+        editingPinId: null,
+        cameraMode: 'orbit',
+        presenting: false,
+        corrections: [],
+        epoch: 0,
+
+        setPresenting: (on) => set({ presenting: on, selectedItemId: null }),
+
+        addSpace: (name) =>
+          set((s) => {
+            const space = makeSpace(name ?? `Space ${s.spaces.length + 1}`)
+            return {
+              spaces: [...s.spaces, space],
+              activeSpaceId: space.id,
+              selectedItemId: null,
+              editingPinId: null,
+              epoch: s.epoch + 1,
+            }
+          }),
+
+        removeSpace: (id) =>
+          set((s) => {
+            // A project always has at least one space; removing the last would
+            // leave the editor with nothing to render.
+            if (s.spaces.length <= 1) return s
+            const spaces = s.spaces.filter((sp) => sp.id !== id)
+            const activeSpaceId =
+              s.activeSpaceId === id ? spaces[0].id : s.activeSpaceId
+            return {
+              spaces,
+              activeSpaceId,
+              selectedItemId: null,
+              editingPinId: null,
+              epoch: s.epoch + 1,
+            }
+          }),
+
+        renameSpace: (id, name) =>
+          set((s) => ({
+            spaces: s.spaces.map((sp) => (sp.id === id ? { ...sp, name } : sp)),
+          })),
+
+        setActiveSpace: (id) =>
+          set((s) =>
+            s.activeSpaceId === id
+              ? s
+              : {
+                  activeSpaceId: id,
+                  selectedItemId: null,
+                  editingPinId: null,
+                  epoch: s.epoch + 1,
+                },
+          ),
+
+        duplicateSpace: (id) =>
+          set((s) => {
+            const src = s.spaces.find((sp) => sp.id === id)
+            if (!src) return s
+            const copy: Space = {
+              ...src,
+              id: uid(),
+              name: `${src.name} copy`,
+              venue: { ...src.venue },
+              // Deep-copy so editing the duplicate cannot mutate the original.
+              pins: src.pins.map((p) => ({ ...p, id: uid(), corners: cloneQuad(p.corners) })),
+              items: src.items.map((it) => ({
+                ...it,
+                id: uid(),
+                position: [...it.position] as Vec3,
+                params: { ...it.params },
+              })),
+            }
+            return {
+              spaces: [...s.spaces, copy],
+              activeSpaceId: copy.id,
+              selectedItemId: null,
+              epoch: s.epoch + 1,
+            }
+          }),
+
+        setVenueMode: (mode) =>
+          patchActive((sp) => ({
+            venue: { ...sp.venue, mode },
+            // Outdoor keeps only the ground and backdrop; drop orphaned pins.
+            pins: sp.pins.filter((p) =>
+              (mode === 'outdoor' ? OUTDOOR_KEPT : INDOOR_SURFACES).includes(p.surface),
+            ),
+          })),
+
+        setVenueSize: (dims) => patchActive((sp) => ({ venue: { ...sp.venue, ...dims } })),
+
+        applyCalibration: (measured, actual) => {
+          if (measured <= 0 || actual <= 0) return
           const k = actual / measured
-          return {
+          patchActive((sp) => ({
             venue: {
-              ...s.venue,
-              width: s.venue.width * k,
-              depth: s.venue.depth * k,
-              height: s.venue.height * k,
+              ...sp.venue,
+              width: sp.venue.width * k,
+              depth: sp.venue.depth * k,
+              height: sp.venue.height * k,
             },
-            // Decor keeps its relative place in the room as the room rescales.
-            items: s.items.map((it) => ({
+            // Decor keeps its place in the room as the room rescales. Sizes are
+            // deliberately untouched: they were authored in real feet already.
+            items: sp.items.map((it) => ({
               ...it,
               position: it.position.map((v) => v * k) as Vec3,
             })),
             calibrated: true,
+          }))
+        },
+
+        addPhoto: (photo) => set((s) => ({ photos: [...s.photos, photo] })),
+
+        removePhoto: (photoId) =>
+          set((s) => ({
+            photos: s.photos.filter((p) => p.id !== photoId),
+            // Pins referencing it must go from *every* space, not just this one.
+            spaces: s.spaces.map((sp) => ({
+              ...sp,
+              pins: sp.pins.filter((p) => p.photoId !== photoId),
+            })),
+          })),
+
+        pinPhoto: (photoId, surface) => {
+          const id = uid()
+          patchActive((sp) => ({
+            // One photo per surface: replace rather than stack.
+            pins: [
+              ...sp.pins.filter((p) => p.surface !== surface),
+              {
+                id,
+                photoId,
+                surface,
+                corners: cloneQuad(FULL_FRAME),
+                opacity: 1,
+                visible: true,
+                proposedBy: 'manual' as const,
+              },
+            ],
+          }))
+          set({ editingPinId: id })
+        },
+
+        updatePin: (pinId, patch) =>
+          patchActive((sp) => ({
+            pins: sp.pins.map((p) => (p.id === pinId ? { ...p, ...patch } : p)),
+          })),
+
+        removePin: (pinId) => {
+          patchActive((sp) => ({ pins: sp.pins.filter((p) => p.id !== pinId) }))
+          if (get().editingPinId === pinId) set({ editingPinId: null })
+        },
+
+        setEditingPin: (pinId) => set({ editingPinId: pinId }),
+
+        addItem: (type, position, params = {}) => {
+          const id = uid()
+          patchActive((sp) => ({
+            items: [...sp.items, { id, type, position, rotationY: 0, params: { ...params } }],
+          }))
+          set({ selectedItemId: id })
+        },
+
+        updateItem: (id, patch) =>
+          patchActive((sp) => ({
+            items: sp.items.map((it) =>
+              it.id === id
+                ? { ...it, ...patch, params: { ...it.params, ...(patch.params ?? {}) } }
+                : it,
+            ),
+          })),
+
+        removeItem: (id) => {
+          patchActive((sp) => ({ items: sp.items.filter((it) => it.id !== id) }))
+          if (get().selectedItemId === id) set({ selectedItemId: null })
+        },
+
+        duplicateItem: (id) => {
+          const src = active()?.items.find((it) => it.id === id)
+          if (!src) return
+          const copy: DecorInstance = {
+            ...src,
+            id: uid(),
+            params: { ...src.params },
+            position: [src.position[0] + 0.8, src.position[1], src.position[2]],
           }
-        }),
+          patchActive((sp) => ({ items: [...sp.items, copy] }))
+          set({ selectedItemId: copy.id })
+        },
 
-      addPhoto: (photo) => set((s) => ({ photos: [...s.photos, photo] })),
+        selectItem: (id) => set({ selectedItemId: id }),
+        setLighting: (preset) => patchActive(() => ({ lighting: preset })),
+        setCameraMode: (mode) => set({ cameraMode: mode, selectedItemId: null }),
 
-      removePhoto: (photoId) =>
-        set((s) => ({
-          photos: s.photos.filter((p) => p.id !== photoId),
-          pins: s.pins.filter((p) => p.photoId !== photoId),
-        })),
+        logCorrection: (event) => set((s) => ({ corrections: [...s.corrections, event] })),
 
-      pinPhoto: (photoId, surface) => {
-        const id = uid()
-        set((s) => ({
-          // One photo per surface: replace rather than stack.
-          pins: [
-            ...s.pins.filter((p) => p.surface !== surface),
-            {
-              id,
-              photoId,
-              surface,
-              corners: cloneQuad(FULL_FRAME),
-              opacity: 1,
-              visible: true,
-              proposedBy: 'manual',
-            },
-          ],
-          editingPinId: id,
-        }))
-      },
+        loadProject: (snapshot) =>
+          set((s) => ({
+            ...snapshot,
+            selectedItemId: null,
+            editingPinId: null,
+            cameraMode: 'orbit',
+            epoch: s.epoch + 1,
+          })),
 
-      updatePin: (pinId, patch) =>
-        set((s) => ({
-          pins: s.pins.map((p) => (p.id === pinId ? { ...p, ...patch } : p)),
-        })),
-
-      removePin: (pinId) =>
-        set((s) => ({
-          pins: s.pins.filter((p) => p.id !== pinId),
-          editingPinId: s.editingPinId === pinId ? null : s.editingPinId,
-        })),
-
-      setEditingPin: (pinId) => set({ editingPinId: pinId }),
-
-      addItem: (type, position, params = {}) => {
-        const id = uid()
-        set((s) => ({
-          items: [
-            ...s.items,
-            { id, type, position, rotationY: 0, params: { ...params } },
-          ],
-          selectedItemId: id,
-        }))
-      },
-
-      updateItem: (id, patch) =>
-        set((s) => ({
-          items: s.items.map((it) =>
-            it.id === id ? { ...it, ...patch, params: { ...it.params, ...(patch.params ?? {}) } } : it,
-          ),
-        })),
-
-      removeItem: (id) =>
-        set((s) => ({
-          items: s.items.filter((it) => it.id !== id),
-          selectedItemId: s.selectedItemId === id ? null : s.selectedItemId,
-        })),
-
-      duplicateItem: (id) => {
-        const src = get().items.find((it) => it.id === id)
-        if (!src) return
-        const copy: DecorInstance = {
-          ...src,
-          id: uid(),
-          params: { ...src.params },
-          position: [src.position[0] + 0.8, src.position[1], src.position[2]],
-        }
-        set((s) => ({ items: [...s.items, copy], selectedItemId: copy.id }))
-      },
-
-      selectItem: (id) => set({ selectedItemId: id }),
-      setLighting: (preset) => set({ lighting: preset }),
-      setCameraMode: (mode) => set({ cameraMode: mode, selectedItemId: null }),
-
-      logCorrection: (event) =>
-        set((s) => ({ corrections: [...s.corrections, event] })),
-
-      loadProject: (snapshot) =>
-        set({
-          ...snapshot,
-          selectedItemId: null,
-          editingPinId: null,
-          cameraMode: 'orbit',
-        }),
-
-      reset: () =>
-        set({
-          venue: { ...DEFAULT_VENUE },
-          photos: [],
-          pins: [],
-          items: [],
-          selectedItemId: null,
-          editingPinId: null,
-          calibrated: false,
-          corrections: [],
-        }),
-    }),
+        reset: () => {
+          const space = makeSpace('Main hall')
+          set((s) => ({
+            spaces: [space],
+            activeSpaceId: space.id,
+            photos: [],
+            selectedItemId: null,
+            editingPinId: null,
+            corrections: [],
+            epoch: s.epoch + 1,
+          }))
+        },
+      }
+    },
     {
       limit: 100,
-      // Selection, camera and the append-only correction log are not edits;
-      // undoing across them would feel broken.
+      // Selection, camera, presentation and the append-only correction log are
+      // not edits, so they are not tracked at all.
       partialize: (s) => ({
-        venue: s.venue,
+        spaces: s.spaces,
+        activeSpaceId: s.activeSpaceId,
         photos: s.photos,
-        pins: s.pins,
-        items: s.items,
-        calibrated: s.calibrated,
-        lighting: s.lighting,
       }),
+      /*
+        Decides whether a change is worth an undo entry, by reference rather
+        than by value — every mutation above is immutable, so an untouched
+        `venue`/`pins`/`items` really is the same object. Deep-comparing would
+        mean JSON-stringifying photos held as data URLs on every keystroke.
+
+        Two things are deliberately excluded, both of which are navigation
+        rather than editing: changing the lighting preset (a way of looking at
+        the scene, not a change to it) and switching the active space.
+      */
+      equality: (a, b) =>
+        a.photos === b.photos &&
+        a.spaces.length === b.spaces.length &&
+        a.spaces.every((sp, i) => {
+          const other = b.spaces[i]
+          return (
+            other !== undefined &&
+            sp.id === other.id &&
+            sp.name === other.name &&
+            sp.venue === other.venue &&
+            sp.pins === other.pins &&
+            sp.items === other.items &&
+            sp.calibrated === other.calibrated
+          )
+        }),
     },
   ),
 )
 
-export const useTemporal = () => useScene.temporal.getState()
+/**
+ * Read a slice of the active space.
+ *
+ * Keeps call sites as short as the old flat store — `useActiveSpace(s => s.venue)`
+ * — while the document underneath is a list of independent spaces.
+ */
+export function useActiveSpace<T>(selector: (space: Space) => T): T {
+  return useScene((s) => selector(s.spaces.find((sp) => sp.id === s.activeSpaceId) ?? s.spaces[0]))
+}
+
+export function activeSpace(): Space {
+  const s = useScene.getState()
+  return s.spaces.find((sp) => sp.id === s.activeSpaceId) ?? s.spaces[0]
+}
 
 export function snapshot(): ProjectSnapshot {
   const s = useScene.getState()
   return {
-    venue: s.venue,
+    spaces: s.spaces,
+    activeSpaceId: s.activeSpaceId,
     photos: s.photos,
-    pins: s.pins,
-    items: s.items,
-    calibrated: s.calibrated,
-    lighting: s.lighting,
     corrections: s.corrections,
   }
 }
-
-export const selectPinFor = (surface: SurfaceId) => (s: SceneState) =>
-  s.pins.find((p) => p.surface === surface)
-
-export const photoById = (photos: PhotoAsset[], id: string) =>
-  photos.find((p) => p.id === id)
 
 export type { Vec2 }

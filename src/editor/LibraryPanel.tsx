@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { CATEGORY_LABELS, DECOR, defaultParams, type Category, type DecorDef } from '../decor/registry'
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 import { readFileAsDataUrl, loadImage, removeBackground } from '../lib/removeBg'
 import { Button, Hint, Panel } from './ui'
 import type { Vec3 } from '../types'
@@ -8,8 +8,8 @@ import type { Vec3 } from '../types'
 const ORDER: Category[] = ['balloons', 'florals', 'structures', 'fabric', 'lighting', 'furniture', 'custom']
 
 export function LibraryPanel() {
-  const venue = useScene((s) => s.venue)
-  const items = useScene((s) => s.items)
+  const venue = useActiveSpace((s) => s.venue)
+  const items = useActiveSpace((s) => s.items)
   const addItem = useScene((s) => s.addItem)
   const addPhoto = useScene((s) => s.addPhoto)
   const [open, setOpen] = useState<Category>('balloons')

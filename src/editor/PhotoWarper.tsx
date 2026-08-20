@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useScene } from '../store/sceneStore'
+import { activeSpace, useActiveSpace, useScene } from '../store/sceneStore'
 import { cloneQuad, FULL_FRAME, isQuadValid } from '../lib/homography'
 import { estimateSurfaceQuad, type EstimatorResult } from '../geometry/estimator'
 import { SURFACE_LABELS, type Vec2 } from '../types'
@@ -14,7 +14,7 @@ const HANDLE_LABELS = ['Top-left', 'Top-right', 'Bottom-right', 'Bottom-left']
  */
 export function PhotoWarper() {
   const editingPinId = useScene((s) => s.editingPinId)
-  const pin = useScene((s) => s.pins.find((p) => p.id === editingPinId))
+  const pin = useActiveSpace((s) => s.pins.find((p) => p.id === editingPinId))
   const photo = useScene((s) => s.photos.find((p) => p.id === pin?.photoId))
   const updatePin = useScene((s) => s.updatePin)
   const setEditingPin = useScene((s) => s.setEditingPin)
@@ -29,11 +29,17 @@ export function PhotoWarper() {
   const openedAt = useRef(Date.now())
   const proposed = useRef<[Vec2, Vec2, Vec2, Vec2] | null>(null)
 
+  // Keyed on the pin *id* only. `pin` is a fresh object on every corner drag, so
+  // depending on it would reset the baseline and the timer on each mouse move —
+  // silently recording every correction as a no-op and wiping the estimator
+  // result the moment the user touched a handle.
   useEffect(() => {
+    if (!editingPinId) return
+    const current = activeSpace().pins.find((p) => p.id === editingPinId)
     openedAt.current = Date.now()
-    proposed.current = pin ? cloneQuad(pin.corners) : null
+    proposed.current = current ? cloneQuad(current.corners) : null
     setEstimate({ status: 'idle' })
-  }, [editingPinId, pin])
+  }, [editingPinId])
 
   const corners = pin?.corners
 
@@ -45,7 +51,11 @@ export function PhotoWarper() {
       // Refuse inside-out quads: the homography would flip and the wall would
       // show a mirrored, unreadable smear.
       if (!isQuadValid(next)) return
-      updatePin(pin.id, { corners: next, proposedBy: 'manual' })
+      // Deliberately does not touch `proposedBy`: it records who *proposed* this
+      // quad, not who last edited it. Stamping 'manual' here would relabel every
+      // estimator proposal the moment a user nudged it — throwing away the one
+      // thing that makes the correction worth learning from.
+      updatePin(pin.id, { corners: next })
     },
     [pin, updatePin],
   )

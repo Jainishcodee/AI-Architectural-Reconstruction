@@ -1,14 +1,14 @@
 import { useRef, useState } from 'react'
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 import { surfacesFor } from '../lib/surfaces'
 import { readFileAsDataUrl, loadImage } from '../lib/removeBg'
 import { SURFACE_LABELS, type SurfaceId } from '../types'
 import { Button, Hint, NumberField, Panel, SelectField } from './ui'
 
 export function VenuePanel() {
-  const venue = useScene((s) => s.venue)
+  const venue = useActiveSpace((s) => s.venue)
   const photos = useScene((s) => s.photos)
-  const pins = useScene((s) => s.pins)
+  const pins = useActiveSpace((s) => s.pins)
   const setVenueMode = useScene((s) => s.setVenueMode)
   const setVenueSize = useScene((s) => s.setVenueSize)
   const addPhoto = useScene((s) => s.addPhoto)

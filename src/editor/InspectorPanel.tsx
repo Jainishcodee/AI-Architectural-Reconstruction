@@ -1,11 +1,11 @@
 import { DECOR_BY_ID } from '../decor/registry'
 import { useGizmo } from '../scene/DecorLayer'
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 import { Button, ColorField, Hint, NumberField, Panel, SelectField, Slider } from './ui'
 
 export function InspectorPanel() {
   const selectedItemId = useScene((s) => s.selectedItemId)
-  const item = useScene((s) => s.items.find((i) => i.id === selectedItemId))
+  const item = useActiveSpace((s) => s.items.find((i) => i.id === selectedItemId))
   const photos = useScene((s) => s.photos)
   const updateItem = useScene((s) => s.updateItem)
   const removeItem = useScene((s) => s.removeItem)

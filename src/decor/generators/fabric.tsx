@@ -58,36 +58,57 @@ export function drapeBom(params: Record<string, number | string>) {
   ]
 }
 
-/** Ceiling-to-floor tent liner: several drapes swept around a centre point. */
+/**
+ * Tent liner: fabric radiating from a gathered point at the ceiling, out and
+ * down to a hem above head height.
+ *
+ * The panels must lean. Hanging them vertically in a ring builds a closed
+ * cylinder of curtain that walls the room off from itself — the decor ends up
+ * hiding the very scene it is decorating.
+ */
 export function CeilingSwoop({ params }: GeneratorProps) {
   const radius = Number(params.radius)
   const height = Number(params.height)
   const panels = Math.round(Number(params.panels))
-  const geo = useDrapeGeometry(Math.max(0.6, (2 * Math.PI * radius) / panels), height, 3, 0.1)
+
+  // Hem stays well above eye level so sightlines across the room survive.
+  const hem = height * 0.72
+  const rise = Math.max(0.1, height - hem)
+  const len = Math.hypot(radius, rise)
+  const width = Math.max(0.5, (2 * Math.PI * radius) / panels)
+  const lean = Math.atan2(radius, rise)
+
+  const geo = useDrapeGeometry(width, len, 3, 0.09)
 
   return (
     <group>
       {Array.from({ length: panels }, (_, i) => {
         const ang = (i / panels) * Math.PI * 2
         return (
-          <mesh
-            key={i}
-            geometry={geo}
-            position={[Math.cos(ang) * radius, height / 2, Math.sin(ang) * radius]}
-            rotation={[0, -ang + Math.PI / 2, 0]}
-            castShadow
-            receiveShadow
-          >
-            <meshStandardMaterial
-              color={String(params.color)}
-              roughness={0.7}
-              side={DoubleSide}
-              transparent
-              opacity={0.93}
-            />
-          </mesh>
+          <group key={i} rotation={[0, -ang, 0]}>
+            <mesh
+              geometry={geo}
+              position={[radius / 2, (height + hem) / 2, 0]}
+              rotation={[0, 0, lean]}
+              castShadow
+              receiveShadow
+            >
+              <meshStandardMaterial
+                color={String(params.color)}
+                roughness={0.7}
+                side={DoubleSide}
+                transparent
+                opacity={0.93}
+              />
+            </mesh>
+          </group>
         )
       })}
+      {/* Gathered boss where every panel meets at the centre. */}
+      <mesh position={[0, height - 0.04, 0]} castShadow>
+        <sphereGeometry args={[Math.min(0.3, radius * 0.1), 16, 12]} />
+        <meshStandardMaterial color={String(params.color)} roughness={0.6} />
+      </mesh>
     </group>
   )
 }

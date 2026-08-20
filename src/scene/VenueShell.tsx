@@ -1,9 +1,9 @@
-import { Suspense, useCallback, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Plane as MathPlane, Vector3 } from 'three'
-import type { ThreeEvent } from '@react-three/fiber'
+import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { PhotoPlane } from './PhotoPlane'
 import { surfaceFrame, surfacesFor } from '../lib/surfaces'
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 import { LIGHTING } from './lighting'
 
 const MIN_DIM = 2
@@ -32,11 +32,16 @@ function DragHandle({
   const [hover, setHover] = useState(false)
   const planeRef = useRef(new MathPlane())
   const hit = useRef(new Vector3())
+  // OrbitControls binds to the canvas DOM element, so R3F's stopPropagation —
+  // which only walks the 3D scene graph — cannot keep a handle drag from also
+  // spinning the camera. The controls have to be switched off explicitly.
+  const controls = useThree((s) => s.controls) as { enabled: boolean } | null
 
   const begin = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation()
       ;(e.target as Element).setPointerCapture?.(e.pointerId)
+      if (controls) controls.enabled = false
       // Constrain to a plane containing the handle, normal to a *different*
       // axis, so the ray always has a well-conditioned intersection.
       const normal =
@@ -51,7 +56,7 @@ function DragHandle({
       )
       setActive(true)
     },
-    [axis, position],
+    [axis, position, controls],
   )
 
   const move = useCallback(
@@ -70,11 +75,27 @@ function DragHandle({
       if (!active) return
       e.stopPropagation()
       ;(e.target as Element).releasePointerCapture?.(e.pointerId)
+      if (controls) controls.enabled = true
       setActive(false)
       onCommit()
     },
-    [active, onCommit],
+    [active, onCommit, controls],
   )
+
+  // A pointerup outside the handle would otherwise leave the camera frozen.
+  useEffect(() => {
+    if (!active) return
+    const release = () => {
+      if (controls) controls.enabled = true
+      setActive(false)
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    return () => {
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+    }
+  }, [active, controls])
 
   return (
     <mesh
@@ -97,16 +118,17 @@ function DragHandle({
 }
 
 export function VenueShell() {
-  const venue = useScene((s) => s.venue)
-  const pins = useScene((s) => s.pins)
+  const venue = useActiveSpace((s) => s.venue)
+  const pins = useActiveSpace((s) => s.pins)
   const photos = useScene((s) => s.photos)
-  const lighting = useScene((s) => s.lighting)
+  const lighting = useActiveSpace((s) => s.lighting)
   const cameraMode = useScene((s) => s.cameraMode)
   const setVenueSize = useScene((s) => s.setVenueSize)
 
+  const presenting = useScene((s) => s.presenting)
   const preset = LIGHTING[lighting]
   const ids = surfacesFor(venue)
-  const showHandles = cameraMode === 'orbit'
+  const showHandles = cameraMode === 'orbit' && !presenting
 
   const clamp = (v: number) => Math.min(MAX_DIM, Math.max(MIN_DIM, v))
 

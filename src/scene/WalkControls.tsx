@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { PointerLockControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Vector3 } from 'three'
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 
 const EYE_HEIGHT = 1.6
 const SPEED = 3.2
@@ -16,7 +16,7 @@ const SPRINT = 2.1
  * actually stand, and this is the cheapest way to catch that before install.
  */
 export function WalkControls() {
-  const venue = useScene((s) => s.venue)
+  const venue = useActiveSpace((s) => s.venue)
   const setCameraMode = useScene((s) => s.setCameraMode)
   const camera = useThree((s) => s.camera)
   const keys = useRef<Record<string, boolean>>({})
@@ -28,15 +28,28 @@ export function WalkControls() {
     camera.position.y = EYE_HEIGHT
     const down = (e: KeyboardEvent) => {
       keys.current[e.code] = true
+      // Kept as a fallback for the un-locked case only. Escape is NOT delivered
+      // here when it is the gesture exiting pointer lock — the browser swallows
+      // it — so `onUnlock` below is what actually ends walk mode.
       if (e.code === 'Escape') setCameraMode('orbit')
     }
     const up = (e: KeyboardEvent) => (keys.current[e.code] = false)
+    // A key held as the window loses focus never gets its keyup, which would
+    // leave the walker sliding forever on return.
+    const clear = () => (keys.current = {})
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
+    window.addEventListener('blur', clear)
     return () => {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', clear)
       keys.current = {}
+      // three's PointerLockControls.disconnect() only drops its listeners, it
+      // never releases the lock. Leaving walk mode by any route other than
+      // Escape — the toolbar toggle, Present, a space switch — would otherwise
+      // strand the user in orbit mode with the cursor still captured.
+      if (document.pointerLockElement) document.exitPointerLock()
     }
   }, [camera, setCameraMode])
 
@@ -72,5 +85,8 @@ export function WalkControls() {
     }
   })
 
-  return <PointerLockControls makeDefault />
+  // The real exit path: whatever released the pointer — Escape, alt-tab, the
+  // browser revoking it — drops us back to orbit, so the user can never end up
+  // stranded in a walk mode that no longer responds to the mouse.
+  return <PointerLockControls makeDefault onUnlock={() => setCameraMode('orbit')} />
 }

@@ -57,6 +57,27 @@ export interface Venue {
   height: number
 }
 
+export type LightingPreset = 'day' | 'golden' | 'evening' | 'night'
+
+/**
+ * One physical space in a project — a hall, a lawn, an entrance, a facade.
+ *
+ * A project is a list of these rather than a single room because photos of a
+ * building's front, back and interior share no visible geometry and cannot be
+ * registered into one model by any method. They are genuinely separate scenes
+ * that happen to belong to the same event, so that is exactly how they are
+ * stored: independent geometry, one shared photo pool, one combined quote.
+ */
+export interface Space {
+  id: string
+  name: string
+  venue: Venue
+  pins: PhotoPin[]
+  items: DecorInstance[]
+  calibrated: boolean
+  lighting: LightingPreset
+}
+
 export interface DecorInstance {
   id: string
   /** Key into the decor registry. */

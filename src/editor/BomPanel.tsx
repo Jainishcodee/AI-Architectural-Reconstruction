@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { DECOR_BY_ID } from '../decor/registry'
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 import { Button, Hint, Panel } from './ui'
 
 interface Aggregated {
@@ -22,25 +22,38 @@ const inr = (n: number) =>
  * are editable.
  */
 export function BomPanel() {
-  const items = useScene((s) => s.items)
-  const calibrated = useScene((s) => s.calibrated)
+  const spaces = useScene((s) => s.spaces)
+  const activeSpaceId = useScene((s) => s.activeSpaceId)
+  const calibrated = useActiveSpace((s) => s.calibrated)
   const [rateOverrides, setRateOverrides] = useState<Record<string, number>>({})
   const [margin, setMargin] = useState(30)
+  /**
+   * A job is quoted as a whole — the mandap, the entrance and the reception hall
+   * go on one invoice — but you also need per-space numbers to decide what to
+   * cut when the client balks at the total.
+   */
+  const [scope, setScope] = useState<'space' | 'project'>('space')
+
+  const uncalibratedSpaces = spaces.filter((sp) => sp.items.length > 0 && !sp.calibrated)
 
   const lines = useMemo<Aggregated[]>(() => {
     const acc = new Map<string, Aggregated>()
-    for (const item of items) {
-      const def = DECOR_BY_ID.get(item.type)
-      if (!def) continue
-      for (const line of def.bom(item.params)) {
-        const key = `${line.label}|${line.unit}`
-        const existing = acc.get(key)
-        if (existing) existing.qty += line.qty
-        else acc.set(key, { ...line })
+    const inScope =
+      scope === 'project' ? spaces : spaces.filter((sp) => sp.id === activeSpaceId)
+    for (const space of inScope) {
+      for (const item of space.items) {
+        const def = DECOR_BY_ID.get(item.type)
+        if (!def) continue
+        for (const line of def.bom(item.params)) {
+          const key = `${line.label}|${line.unit}`
+          const existing = acc.get(key)
+          if (existing) existing.qty += line.qty
+          else acc.set(key, { ...line })
+        }
       }
     }
     return [...acc.values()].sort((a, b) => a.label.localeCompare(b.label))
-  }, [items])
+  }, [spaces, activeSpaceId, scope])
 
   const rateFor = (l: Aggregated) => rateOverrides[`${l.label}|${l.unit}`] ?? l.rate
   const subtotal = lines.reduce((sum, l) => sum + Math.ceil(l.qty) * rateFor(l), 0)
@@ -72,14 +85,27 @@ export function BomPanel() {
         ) : undefined
       }
     >
-      {!calibrated && items.length > 0 && (
-        <div className="mb-2">
-          <Hint tone="warn">
-            Scene is not calibrated, so every length below is a guess. Set one real
-            measurement to make these quantities mean something.
-          </Hint>
-        </div>
-      )}
+      <div className="mb-2 flex gap-1">
+        <Button active={scope === 'space'} onClick={() => setScope('space')}>
+          This space
+        </Button>
+        <Button active={scope === 'project'} onClick={() => setScope('project')}>
+          Whole event{spaces.length > 1 ? ` (${spaces.length})` : ''}
+        </Button>
+      </div>
+
+      {lines.length > 0 &&
+        (scope === 'space' ? !calibrated : uncalibratedSpaces.length > 0) && (
+          <div className="mb-2">
+            <Hint tone="warn">
+              {scope === 'space'
+                ? 'This space is not calibrated, so every length below is a guess. Set one real measurement to make these quantities mean something.'
+                : `${uncalibratedSpaces.length} of ${spaces.length} spaces are not calibrated (${uncalibratedSpaces
+                    .map((sp) => sp.name)
+                    .join(', ')}), so this total is a guess.`}
+            </Hint>
+          </div>
+        )}
 
       {lines.length === 0 ? (
         <Hint>Place some decor and the quantities and costs build themselves.</Hint>

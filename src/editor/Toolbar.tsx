@@ -1,18 +1,32 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LIGHTING } from '../scene/lighting'
-import { useScene, type LightingPreset } from '../store/sceneStore'
-import { TEMPLATES, instantiate } from '../templates'
+import { useActiveSpace, useScene, type LightingPreset } from '../store/sceneStore'
+import {
+  exportCorrections,
+  exportProjectFile,
+  importProjectFile,
+} from '../store/persistence'
+import { TEMPLATES, templateSpace } from '../templates'
 import { Button } from './ui'
 
 const PRESETS = Object.keys(LIGHTING) as LightingPreset[]
 
-export function Toolbar({ onCalibrate }: { onCalibrate: () => void }) {
-  const lighting = useScene((s) => s.lighting)
+export function Toolbar({
+  onCalibrate,
+  savedAt,
+}: {
+  onCalibrate: () => void
+  savedAt: number | null
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const corrections = useScene((s) => s.corrections.length)
+  const lighting = useActiveSpace((s) => s.lighting)
   const setLighting = useScene((s) => s.setLighting)
   const cameraMode = useScene((s) => s.cameraMode)
   const setCameraMode = useScene((s) => s.setCameraMode)
-  const calibrated = useScene((s) => s.calibrated)
+  const calibrated = useActiveSpace((s) => s.calibrated)
   const loadProject = useScene((s) => s.loadProject)
+  const setPresenting = useScene((s) => s.setPresenting)
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [undoState, setUndoState] = useState({ past: 0, future: 0 })
 
@@ -56,18 +70,25 @@ export function Toolbar({ onCalibrate }: { onCalibrate: () => void }) {
     a.click()
   }
 
+  /**
+   * A template arrives as a new space rather than replacing the project — an
+   * event spans several of them, and wiping a decorator's work to look at a
+   * starter scene is unforgivable. The exception is a project the user has not
+   * touched yet, where leaving an empty "Main hall" behind is just clutter.
+   */
   const applyTemplate = (id: string) => {
     const t = TEMPLATES.find((x) => x.id === id)
     if (!t) return
+    const space = templateSpace(t)
+    const s = useScene.getState()
+    const untouched =
+      s.spaces.length === 1 && s.spaces[0].items.length === 0 && s.spaces[0].pins.length === 0
+
     loadProject({
-      venue: { ...t.venue },
-      photos: [],
-      pins: [],
-      items: instantiate(t),
-      // Templates ship with real-world dimensions already set.
-      calibrated: true,
-      lighting: t.id === 'haldi-lawn' ? 'day' : 'evening',
-      corrections: [],
+      spaces: untouched ? [space] : [...s.spaces, space],
+      activeSpaceId: space.id,
+      photos: s.photos,
+      corrections: s.corrections,
     })
     setTemplatesOpen(false)
   }
@@ -133,10 +154,43 @@ export function Toolbar({ onCalibrate }: { onCalibrate: () => void }) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {savedAt && (
+          <span className="text-[10px] text-[#5f6875]" title="Saved locally in this browser">
+            saved {new Date(savedAt).toLocaleTimeString()}
+          </span>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void importProjectFile(f).catch((err) => alert(err.message))
+            e.target.value = ''
+          }}
+        />
+        <Button onClick={() => fileRef.current?.click()} title="Open a .json project">
+          Open
+        </Button>
+        <Button onClick={exportProjectFile} title="Save the project to a file">
+          Save file
+        </Button>
+        {corrections > 0 && (
+          <Button
+            onClick={exportCorrections}
+            title={`Export ${corrections} alignment corrections as training data`}
+          >
+            ⤓ {corrections}
+          </Button>
+        )}
         <Button onClick={onCalibrate} tone={calibrated ? 'default' : 'primary'}>
           {calibrated ? '📐 Scale set' : '📐 Set real size'}
         </Button>
         <Button onClick={exportPng}>⬇ PNG</Button>
+        <Button tone="primary" onClick={() => setPresenting(true)} title="Full-screen client view">
+          ▶ Present
+        </Button>
       </div>
     </header>
   )

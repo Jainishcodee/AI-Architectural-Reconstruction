@@ -1,4 +1,4 @@
-import { useScene } from '../store/sceneStore'
+import { useActiveSpace, useScene } from '../store/sceneStore'
 import { DecorItem, type GizmoMode } from './DecorItem'
 import { create } from 'zustand'
 
@@ -13,9 +13,10 @@ export const useGizmo = create<{ mode: GizmoMode; setMode: (m: GizmoMode) => voi
 }))
 
 export function DecorLayer() {
-  const items = useScene((s) => s.items)
+  const items = useActiveSpace((s) => s.items)
   const selectedItemId = useScene((s) => s.selectedItemId)
   const cameraMode = useScene((s) => s.cameraMode)
+  const presenting = useScene((s) => s.presenting)
   const mode = useGizmo((s) => s.mode)
 
   return (
@@ -24,8 +25,9 @@ export function DecorLayer() {
         <DecorItem
           key={item.id}
           item={item}
-          // Gizmos are meaningless in walk mode and block the view.
-          selected={cameraMode === 'orbit' && item.id === selectedItemId}
+          // Gizmos are meaningless in walk mode, block the view, and have no
+          // business being visible while a client is looking at the scene.
+          selected={cameraMode === 'orbit' && !presenting && item.id === selectedItemId}
           mode={mode}
         />
       ))}
