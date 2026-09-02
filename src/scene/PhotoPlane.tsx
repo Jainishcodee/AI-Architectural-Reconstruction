@@ -1,10 +1,9 @@
 import { useMemo, useRef } from 'react'
 import { useTexture } from '@react-three/drei'
-import { Color, FrontSide, Matrix3, ShaderMaterial } from 'three'
+import { Color, DoubleSide, FrontSide, Matrix3, ShaderMaterial, Vector2 } from 'three'
 import { useFrame } from '@react-three/fiber'
 import { wallUvToPhotoUv } from '../lib/homography'
-import type { SurfaceFrame } from '../lib/surfaces'
-import type { PhotoAsset, PhotoPin } from '../types'
+import type { PhotoAsset, PhotoPin, Vec3 } from '../types'
 
 /**
  * The photo is warped on the GPU rather than resampled on the CPU: the wall's
@@ -28,13 +27,19 @@ const FRAG = /* glsl */ `
   uniform vec3 uSurface;
   uniform vec3 uTint;
   uniform float uHasMap;
+  uniform vec2 uUvOffset;
+  uniform vec2 uUvScale;
   varying vec2 vUv;
 
   void main() {
     vec3 base = uSurface;
 
     if (uHasMap > 0.5) {
-      vec3 p = uH * vec3(vUv, 1.0);
+      // A wall broken by a doorway is drawn as several panels, but the photo
+      // pinned to it spans the whole wall — so map this panel's UV back into
+      // the wall's before applying the homography.
+      vec2 wallUv = uUvOffset + vUv * uUvScale;
+      vec3 p = uH * vec3(wallUv, 1.0);
       // Behind the camera plane of the original shot — nothing valid to sample.
       if (p.z > 0.0) {
         vec2 uv = p.xy / p.z;
@@ -50,16 +55,31 @@ const FRAG = /* glsl */ `
   }
 `
 
+export interface UvRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+const FULL_UV: UvRect = { x: 0, y: 0, w: 1, h: 1 }
+
 interface Props {
-  frame: SurfaceFrame
+  position: Vec3
+  rotation: Vec3
+  width: number
+  height: number
+  /** This panel's slice of its wall, for photos that span several panels. */
+  uv?: UvRect
   pin?: PhotoPin
   photo?: PhotoAsset
   tint: string
   surfaceColor: string
-  onPointerDown?: (e: never) => void
+  /** Floors are seen from above only; a transom panel can be seen from behind. */
+  doubleSided?: boolean
 }
 
-function WarpedSurface({ pin, photo, tint, surfaceColor }: Props) {
+function WarpedSurface({ pin, photo, tint, surfaceColor, uv = FULL_UV, doubleSided }: Props) {
   const texture = useTexture(photo!.src)
   const matRef = useRef<ShaderMaterial>(null)
 
@@ -71,6 +91,8 @@ function WarpedSurface({ pin, photo, tint, surfaceColor }: Props) {
       uSurface: { value: new Color(surfaceColor) },
       uTint: { value: new Color(tint) },
       uHasMap: { value: 1 },
+      uUvOffset: { value: new Vector2(uv.x, uv.y) },
+      uUvScale: { value: new Vector2(uv.w, uv.h) },
     }),
     // Built once; every frame-varying value is written in useFrame below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,11 +110,13 @@ function WarpedSurface({ pin, photo, tint, surfaceColor }: Props) {
     m.uniforms.uSurface.value.set(surfaceColor)
     m.uniforms.uTint.value.set(tint)
     m.uniforms.uMap.value = texture
+    m.uniforms.uUvOffset.value.set(uv.x, uv.y)
+    m.uniforms.uUvScale.value.set(uv.w, uv.h)
   })
 
-  // Front-face only, with every surface's normal pointing into the room: the
-  // walls between the camera and the scene cull themselves, so an orbiting user
-  // always sees inside instead of staring at the outside of a closed box.
+  // Front-face only by default, with every surface's normal pointing into the
+  // room: the walls between the camera and the scene cull themselves, so an
+  // orbiting user always sees inside instead of the outside of a closed box.
   return (
     <shaderMaterial
       ref={matRef}
@@ -100,29 +124,24 @@ function WarpedSurface({ pin, photo, tint, surfaceColor }: Props) {
       vertexShader={VERT}
       fragmentShader={FRAG}
       uniforms={uniforms}
-      side={FrontSide}
+      side={doubleSided ? DoubleSide : FrontSide}
     />
   )
 }
 
 export function PhotoPlane(props: Props) {
-  const { frame, pin, photo } = props
+  const { position, rotation, width, height, pin, photo, surfaceColor, doubleSided } = props
   const hasPhoto = Boolean(pin && photo && pin.visible)
 
   return (
-    <mesh
-      position={frame.position}
-      rotation={frame.rotation}
-      receiveShadow
-      userData={{ surface: frame.id }}
-    >
-      <planeGeometry args={[frame.width, frame.height]} />
+    <mesh position={position} rotation={rotation} receiveShadow>
+      <planeGeometry args={[width, height]} />
       {hasPhoto ? (
         <WarpedSurface {...props} />
       ) : (
         <meshStandardMaterial
-          color={props.surfaceColor}
-          side={FrontSide}
+          color={surfaceColor}
+          side={doubleSided ? DoubleSide : FrontSide}
           roughness={0.95}
           metalness={0}
         />

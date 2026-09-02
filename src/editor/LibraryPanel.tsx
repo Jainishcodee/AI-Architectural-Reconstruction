@@ -12,6 +12,7 @@ export function LibraryPanel() {
   const items = useActiveSpace((s) => s.items)
   const addItem = useScene((s) => s.addItem)
   const addPhoto = useScene((s) => s.addPhoto)
+  const activeWingId = useScene((s) => s.activeWingId)
   const [open, setOpen] = useState<Category>('balloons')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -24,9 +25,14 @@ export function LibraryPanel() {
     const ang = (n % 6) * (Math.PI / 3)
     const x = Math.cos(ang) * ring
     const z = Math.sin(ang) * ring
-    if (def.mount === 'ceiling') return [x, venue.height * 0.82, z]
-    if (def.mount === 'wall') return [x, 0, -venue.depth / 2 + 0.12]
-    return [x, 0, z]
+    // Spawn around the middle of whichever wing is being edited, so a piece
+    // added while working on a side wing does not appear in the far hall.
+    const wing = venue.wings.find((w) => w.id === activeWingId) ?? venue.wings[0]
+    const cx = wing ? wing.x : 0
+    const cz = wing ? wing.z : 0
+    if (def.mount === 'ceiling') return [cx + x, (wing?.height ?? 4) * 0.82, cz + z]
+    if (def.mount === 'wall') return [cx + x, 0, cz - (wing?.depth ?? 8) / 2 + 0.12]
+    return [cx + x, 0, cz + z]
   }
 
   const onUploadProp = async (files: FileList | null) => {

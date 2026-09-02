@@ -1,16 +1,29 @@
 import { useRef, useState } from 'react'
 import { useActiveSpace, useScene } from '../store/sceneStore'
 import { surfacesFor } from '../lib/surfaces'
+import { overlapsAny, WALL_SIDES, type WallSide } from '../lib/wings'
 import { readFileAsDataUrl, loadImage } from '../lib/removeBg'
 import { SURFACE_LABELS, type SurfaceId } from '../types'
 import { Button, Hint, NumberField, Panel, SelectField } from './ui'
+
+/** Which way a new wing goes, in the user's terms rather than compass points. */
+const EXTEND_LABELS: Record<string, string> = {
+  north: '↑ Beyond the back',
+  south: '↓ Out the front',
+  west: '← To the left',
+  east: '→ To the right',
+}
 
 export function VenuePanel() {
   const venue = useActiveSpace((s) => s.venue)
   const photos = useScene((s) => s.photos)
   const pins = useActiveSpace((s) => s.pins)
   const setVenueMode = useScene((s) => s.setVenueMode)
-  const setVenueSize = useScene((s) => s.setVenueSize)
+  const activeWingId = useScene((s) => s.activeWingId)
+  const setActiveWing = useScene((s) => s.setActiveWing)
+  const updateWing = useScene((s) => s.updateWing)
+  const addWing = useScene((s) => s.addWing)
+  const removeWing = useScene((s) => s.removeWing)
   const addPhoto = useScene((s) => s.addPhoto)
   const removePhoto = useScene((s) => s.removePhoto)
   const pinPhoto = useScene((s) => s.pinPhoto)
@@ -43,6 +56,10 @@ export function VenuePanel() {
   }
 
   const surfaces = surfacesFor(venue)
+  const wing = venue.wings.find((w) => w.id === activeWingId) ?? venue.wings[0]
+  // Two wings sharing floor area produce z-fighting and an undefined opening,
+  // so it is called out rather than silently rendered wrong.
+  const overlapping = wing ? overlapsAny(venue, wing) : false
 
   return (
     <>
@@ -56,29 +73,97 @@ export function VenuePanel() {
           ]}
           onChange={(v) => setVenueMode(v as 'indoor' | 'outdoor')}
         />
-        <div className="grid grid-cols-3 gap-2">
-          <NumberField
-            label="Width"
-            unit="ft"
-            value={venue.width}
-            onChange={(v) => setVenueSize({ width: Math.max(2, v) })}
-          />
-          <NumberField
-            label="Depth"
-            unit="ft"
-            value={venue.depth}
-            onChange={(v) => setVenueSize({ depth: Math.max(2, v) })}
-          />
-          {venue.mode === 'indoor' && (
-            <NumberField
-              label="Height"
-              unit="ft"
-              value={venue.height}
-              onChange={(v) => setVenueSize({ height: Math.max(2, v) })}
-            />
-          )}
-        </div>
-        <Hint>Drag the gold nubs in the 3D view to resize the room by eye.</Hint>
+
+        {venue.wings.length > 1 && (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {venue.wings.map((w) => (
+              <Button
+                key={w.id}
+                active={w.id === wing?.id}
+                onClick={() => setActiveWing(w.id)}
+              >
+                {w.name}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {wing && (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <NumberField
+                label="Width"
+                unit="ft"
+                value={wing.width}
+                onChange={(v) => updateWing(wing.id, { width: Math.max(1.5, v) })}
+              />
+              <NumberField
+                label="Depth"
+                unit="ft"
+                value={wing.depth}
+                onChange={(v) => updateWing(wing.id, { depth: Math.max(1.5, v) })}
+              />
+              {venue.mode === 'indoor' && (
+                <NumberField
+                  label="Height"
+                  unit="ft"
+                  value={wing.height}
+                  onChange={(v) => updateWing(wing.id, { height: Math.max(1.5, v) })}
+                />
+              )}
+            </div>
+
+            {venue.wings.length > 1 && (
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField
+                  label="Offset X"
+                  unit="ft"
+                  min={-200}
+                  value={wing.x}
+                  onChange={(v) => updateWing(wing.id, { x: v })}
+                />
+                <NumberField
+                  label="Offset Z"
+                  unit="ft"
+                  min={-200}
+                  value={wing.z}
+                  onChange={(v) => updateWing(wing.id, { z: v })}
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        <Hint>Drag the gold nubs in the 3D view to push a wall in or out.</Hint>
+
+        {venue.mode === 'indoor' && wing && (
+          <div className="mt-3 border-t border-[#262c36] pt-3">
+            <p className="mb-1.5 text-[11px] text-[#9aa4b2]">
+              Extend {venue.wings.length > 1 ? wing.name.toLowerCase() : 'the room'} —
+              the shared wall opens automatically.
+            </p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {WALL_SIDES.map((side) => (
+                <Button key={side} onClick={() => addWing(side as WallSide)}>
+                  {EXTEND_LABELS[side]}
+                </Button>
+              ))}
+            </div>
+            {venue.wings.length > 1 && (
+              <div className="mt-2 flex items-center gap-2">
+                <Button tone="danger" onClick={() => removeWing(wing.id)}>
+                  Remove {wing.name.toLowerCase()}
+                </Button>
+              </div>
+            )}
+            {overlapping && (
+              <p className="mt-2 text-[11px] text-[#f0a0a8]">
+                {wing.name} overlaps another area — nudge its offset until they only
+                touch, or the shared wall cannot be worked out.
+              </p>
+            )}
+          </div>
+        )}
       </Panel>
 
       <Panel

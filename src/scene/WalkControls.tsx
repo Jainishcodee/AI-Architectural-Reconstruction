@@ -3,6 +3,7 @@ import { PointerLockControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { useActiveSpace, useScene } from '../store/sceneStore'
+import { pointInVenue } from '../lib/wings'
 
 const EYE_HEIGHT = 1.6
 const SPEED = 3.2
@@ -23,9 +24,12 @@ export function WalkControls() {
   const dir = useRef(new Vector3())
   const fwd = useRef(new Vector3())
   const right = useRef(new Vector3())
+  /** Last position known to be inside the venue, for wall sliding. */
+  const before = useRef(new Vector3())
 
   useEffect(() => {
     camera.position.y = EYE_HEIGHT
+    before.current.copy(camera.position)
     const down = (e: KeyboardEvent) => {
       keys.current[e.code] = true
       // Kept as a fallback for the un-locked case only. Escape is NOT delivered
@@ -74,15 +78,21 @@ export function WalkControls() {
     camera.position.add(dir.current)
     camera.position.y = EYE_HEIGHT
 
-    // Soft-clamp inside the room rather than colliding: walking through a wall
-    // is disorienting, but a hard stop on invisible geometry is worse.
-    const pad = 0.35
-    const hw = venue.width / 2 - pad
-    const hd = venue.depth / 2 - pad
-    if (venue.mode === 'indoor') {
-      camera.position.x = Math.max(-hw, Math.min(hw, camera.position.x))
-      camera.position.z = Math.max(-hd, Math.min(hd, camera.position.z))
+    /*
+      Keep the walker on some wing's floor. With several wings this cannot be a
+      box clamp any more — the point has to be tested against each footprint, so
+      walking through the opening from a foyer into the hall is allowed while
+      stepping out into the void is not. On refusal the move is simply undone,
+      which slides the user along a wall instead of stopping them dead.
+    */
+    if (venue.mode === 'indoor' && !pointInVenue(venue, camera.position.x, camera.position.z, 0.35)) {
+      const slideX = pointInVenue(venue, camera.position.x, before.current.z, 0.35)
+      const slideZ = pointInVenue(venue, before.current.x, camera.position.z, 0.35)
+      if (slideX) camera.position.z = before.current.z
+      else if (slideZ) camera.position.x = before.current.x
+      else camera.position.copy(before.current)
     }
+    before.current.copy(camera.position)
   })
 
   // The real exit path: whatever released the pointer — Escape, alt-tab, the

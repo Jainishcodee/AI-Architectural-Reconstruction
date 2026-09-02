@@ -3,6 +3,7 @@ import { DECOR_BY_ID } from '../decor/registry'
 import { LIGHTING } from '../scene/lighting'
 import { useActiveSpace, useScene, type LightingPreset } from '../store/sceneStore'
 import { toFeet } from '../types'
+import { venueDepth, venueWidth } from '../lib/wings'
 import { Button } from './ui'
 
 const PRESETS = Object.keys(LIGHTING) as LightingPreset[]
@@ -72,7 +73,8 @@ export function PresentBar() {
         <p className="text-[11px] uppercase tracking-[0.16em] text-white/60">
           {multi ? `${activeName} · ` : ''}
           {venue.mode === 'indoor' ? 'Indoor' : 'Outdoor'} ·{' '}
-          {toFeet(venue.width).toFixed(0)} × {toFeet(venue.depth).toFixed(0)} ft
+          {toFeet(venueWidth(venue)).toFixed(0)} × {toFeet(venueDepth(venue)).toFixed(0)} ft
+          {venue.wings.length > 1 ? ` · ${venue.wings.length} areas` : ''}
         </p>
         {eventTotal > 0 && (
           <p className="mt-0.5 text-3xl font-semibold tracking-tight text-white">

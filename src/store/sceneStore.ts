@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { temporal } from 'zundo'
 import { cloneQuad, FULL_FRAME } from '../lib/homography'
+import { attachedWing, normalizeVenue, type WallSide } from '../lib/wings'
 import type {
   CorrectionEvent,
   DecorInstance,
@@ -13,6 +14,7 @@ import type {
   Vec3,
   Venue,
   VenueMode,
+  Wing,
 } from '../types'
 
 export type { LightingPreset }
@@ -28,6 +30,8 @@ interface SceneState {
 
   selectedItemId: string | null
   editingPinId: string | null
+  /** Which wing the panel is editing. Null means the first one. */
+  activeWingId: string | null
   cameraMode: CameraMode
   presenting: boolean
 
@@ -50,8 +54,12 @@ interface SceneState {
   duplicateSpace: (id: string) => void
 
   setVenueMode: (mode: VenueMode) => void
-  setVenueSize: (dims: Partial<Pick<Venue, 'width' | 'depth' | 'height'>>) => void
   applyCalibration: (measured: number, actual: number) => void
+
+  addWing: (side: WallSide) => void
+  updateWing: (wingId: string, patch: Partial<Omit<Wing, 'id'>>) => void
+  removeWing: (wingId: string) => void
+  setActiveWing: (wingId: string | null) => void
 
   addPhoto: (photo: PhotoAsset) => void
   removePhoto: (photoId: string) => void
@@ -82,15 +90,20 @@ export interface ProjectSnapshot {
 }
 
 /** Roughly a 40 x 30 x 13 ft hall — a plausible mid-size banquet space. */
-const DEFAULT_VENUE: Venue = { mode: 'indoor', width: 12, depth: 9, height: 4 }
+const defaultVenue = (): Venue => ({
+  mode: 'indoor',
+  wings: [
+    { id: crypto.randomUUID(), name: 'Main', x: 0, z: 0, width: 12, depth: 9, height: 4 },
+  ],
+})
 
 const uid = () => crypto.randomUUID()
 
-function makeSpace(name: string, venue: Venue = DEFAULT_VENUE): Space {
+function makeSpace(name: string, venue: Venue = defaultVenue()): Space {
   return {
     id: uid(),
     name,
-    venue: { ...venue },
+    venue: normalizeVenue(venue),
     pins: [],
     items: [],
     calibrated: false,
@@ -124,6 +137,7 @@ export const useScene = create<SceneState>()(
         photos: [],
         selectedItemId: null,
         editingPinId: null,
+        activeWingId: null,
         cameraMode: 'orbit',
         presenting: false,
         corrections: [],
@@ -212,7 +226,53 @@ export const useScene = create<SceneState>()(
             ),
           })),
 
-        setVenueSize: (dims) => patchActive((sp) => ({ venue: { ...sp.venue, ...dims } })),
+        addWing: (side) => {
+          const sp = active()
+          const host =
+            sp.venue.wings.find((w) => w.id === get().activeWingId) ?? sp.venue.wings[0]
+          if (!host) return
+          // A new wing starts smaller than its host and matches its height, so
+          // it reads as an extension rather than replacing the room.
+          const wing = attachedWing(
+            host,
+            side,
+            {
+              width: side === 'west' || side === 'east' ? host.width * 0.6 : host.width * 0.7,
+              depth: side === 'north' || side === 'south' ? host.depth * 0.6 : host.depth * 0.7,
+              height: host.height,
+            },
+            `Wing ${sp.venue.wings.length + 1}`,
+          )
+          patchActive((space) => ({
+            venue: { ...space.venue, wings: [...space.venue.wings, wing] },
+          }))
+          set({ activeWingId: wing.id })
+        },
+
+        updateWing: (wingId, patch) =>
+          patchActive((sp) => ({
+            venue: {
+              ...sp.venue,
+              wings: sp.venue.wings.map((w) => (w.id === wingId ? { ...w, ...patch } : w)),
+            },
+          })),
+
+        removeWing: (wingId) => {
+          const sp = active()
+          // The venue must keep at least one wing or there is nothing to render.
+          if (sp.venue.wings.length <= 1) return
+          patchActive((space) => ({
+            venue: {
+              ...space.venue,
+              wings: space.venue.wings.filter((w) => w.id !== wingId),
+            },
+            // Pins on the removed wing have nowhere left to live.
+            pins: space.pins.filter((p) => (p.wingId ?? space.venue.wings[0]?.id) !== wingId),
+          }))
+          if (get().activeWingId === wingId) set({ activeWingId: null })
+        },
+
+        setActiveWing: (wingId) => set({ activeWingId: wingId }),
 
         applyCalibration: (measured, actual) => {
           if (measured <= 0 || actual <= 0) return
@@ -220,9 +280,15 @@ export const useScene = create<SceneState>()(
           patchActive((sp) => ({
             venue: {
               ...sp.venue,
-              width: sp.venue.width * k,
-              depth: sp.venue.depth * k,
-              height: sp.venue.height * k,
+              // Every wing scales together, so the venue keeps its shape.
+              wings: sp.venue.wings.map((w) => ({
+                ...w,
+                x: w.x * k,
+                z: w.z * k,
+                width: w.width * k,
+                depth: w.depth * k,
+                height: w.height * k,
+              })),
             },
             // Decor keeps its place in the room as the room rescales. Sizes are
             // deliberately untouched: they were authored in real feet already.
@@ -248,14 +314,19 @@ export const useScene = create<SceneState>()(
 
         pinPhoto: (photoId, surface) => {
           const id = uid()
+          const wingId = get().activeWingId ?? active().venue.wings[0]?.id
           patchActive((sp) => ({
-            // One photo per surface: replace rather than stack.
+            // One photo per surface *of this wing*: replace rather than stack.
             pins: [
-              ...sp.pins.filter((p) => p.surface !== surface),
+              ...sp.pins.filter(
+                (p) =>
+                  p.surface !== surface || (p.wingId ?? sp.venue.wings[0]?.id) !== wingId,
+              ),
               {
                 id,
                 photoId,
                 surface,
+                wingId,
                 corners: cloneQuad(FULL_FRAME),
                 opacity: 1,
                 visible: true,
@@ -322,8 +393,15 @@ export const useScene = create<SceneState>()(
         loadProject: (snapshot) =>
           set((s) => ({
             ...snapshot,
+            // Projects saved before wings existed carry a flat
+            // `{ width, depth, height }` venue; rebuild those as one wing.
+            spaces: snapshot.spaces.map((sp) => ({
+              ...sp,
+              venue: normalizeVenue(sp.venue),
+            })),
             selectedItemId: null,
             editingPinId: null,
+            activeWingId: null,
             cameraMode: 'orbit',
             epoch: s.epoch + 1,
           })),
@@ -336,6 +414,7 @@ export const useScene = create<SceneState>()(
             photos: [],
             selectedItemId: null,
             editingPinId: null,
+            activeWingId: null,
             corrections: [],
             epoch: s.epoch + 1,
           }))

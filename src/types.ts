@@ -42,6 +42,11 @@ export interface PhotoPin {
   id: string
   photoId: string
   surface: SurfaceId
+  /**
+   * Which wing the surface belongs to. Optional so projects saved before wings
+   * existed still load — a missing id resolves to the first wing.
+   */
+  wingId?: string
   corners: [Vec2, Vec2, Vec2, Vec2]
   opacity: number
   visible: boolean
@@ -49,12 +54,42 @@ export interface PhotoPin {
   proposedBy: 'manual' | 'vanishing-point' | 'depth'
 }
 
-export interface Venue {
-  mode: VenueMode
+/**
+ * One rectangular block of a venue, axis-aligned, standing on the ground plane.
+ *
+ * A venue is a list of these rather than a single box because real halls turn
+ * corners: a foyer opening into a hall, an L-shaped banquet room, a stage alcove.
+ * Each wing carries its own ceiling height — a low entrance running into a high
+ * hall is the common case, and forcing one height across the venue would make
+ * exactly that shape unrepresentable.
+ *
+ * Wings are never rotated. An L, T or U shape is fully described by axis-aligned
+ * rectangles, and allowing rotation would buy nothing while making the shared-wall
+ * maths below far harder.
+ */
+export interface Wing {
+  id: string
+  name: string
+  /** Centre of the footprint on the ground plane, metres. */
+  x: number
+  z: number
   /** Metres. Displayed in feet — Indian decor is quoted in feet. */
   width: number
   depth: number
   height: number
+}
+
+export interface Venue {
+  mode: VenueMode
+  wings: Wing[]
+}
+
+/** Axis-aligned footprint of a wing. */
+export interface Bounds {
+  xMin: number
+  xMax: number
+  zMin: number
+  zMax: number
 }
 
 export type LightingPreset = 'day' | 'golden' | 'evening' | 'night'

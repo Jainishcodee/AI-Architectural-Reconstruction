@@ -1,14 +1,25 @@
 import { useState } from 'react'
 import { useActiveSpace, useScene } from '../store/sceneStore'
-import { fromFeet, toFeet } from '../types'
+import { fromFeet, toFeet, type Venue } from '../types'
+import { venueDepth, venueHeight, venueWidth } from '../lib/wings'
 import { Button, Hint, SelectField } from './ui'
 
 type Ref = 'width' | 'depth' | 'height'
 
 const LABELS: Record<Ref, string> = {
-  width: 'Back wall width',
-  depth: 'Room depth (front to back)',
-  height: 'Ceiling height',
+  width: 'Overall width (left to right)',
+  depth: 'Overall depth (front to back)',
+  height: 'Tallest ceiling height',
+}
+
+/**
+ * Measured across the whole venue rather than one wing, so the reference the
+ * user picks is something they can actually stand in the room and check.
+ */
+const MEASURE: Record<Ref, (v: Venue) => number> = {
+  width: venueWidth,
+  depth: venueDepth,
+  height: venueHeight,
 }
 
 /**
@@ -24,9 +35,9 @@ export function ScaleCalibrator({ onClose }: { onClose: () => void }) {
   const applyCalibration = useScene((s) => s.applyCalibration)
   const calibrated = useActiveSpace((s) => s.calibrated)
   const [ref, setRef] = useState<Ref>('width')
-  const [feet, setFeet] = useState(() => toFeet(venue.width).toFixed(0))
+  const [feet, setFeet] = useState(() => toFeet(venueWidth(venue)).toFixed(0))
 
-  const current = venue[ref]
+  const current = MEASURE[ref](venue)
   const entered = Number(feet)
   const valid = Number.isFinite(entered) && entered > 0
   const factor = valid ? fromFeet(entered) / current : 1
@@ -54,7 +65,7 @@ export function ScaleCalibrator({ onClose }: { onClose: () => void }) {
             .map((k) => ({ value: k, label: LABELS[k] }))}
           onChange={(v) => {
             setRef(v as Ref)
-            setFeet(toFeet(venue[v as Ref]).toFixed(0))
+            setFeet(toFeet(MEASURE[v as Ref](venue)).toFixed(0))
           }}
         />
 
@@ -79,9 +90,11 @@ export function ScaleCalibrator({ onClose }: { onClose: () => void }) {
           <div className="mb-3">
             <Hint>
               Scene will be resized {factor > 1 ? 'up' : 'down'} by {(factor * 100 - 100).toFixed(0)}%
-              — the room becomes {toFeet(venue.width * factor).toFixed(0)} ×{' '}
-              {toFeet(venue.depth * factor).toFixed(0)} ft
-              {venue.mode === 'indoor' && `, ${toFeet(venue.height * factor).toFixed(0)} ft high`}.
+              — the venue becomes {toFeet(venueWidth(venue) * factor).toFixed(0)} ×{' '}
+              {toFeet(venueDepth(venue) * factor).toFixed(0)} ft
+              {venue.mode === 'indoor' &&
+                `, up to ${toFeet(venueHeight(venue) * factor).toFixed(0)} ft high`}
+              {venue.wings.length > 1 ? ` across ${venue.wings.length} areas` : ''}.
             </Hint>
           </div>
         )}

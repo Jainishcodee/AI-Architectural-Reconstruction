@@ -1,11 +1,17 @@
 import { DECOR_BY_ID, defaultParams } from '../decor/registry'
-import type { DecorInstance, Space, Venue } from '../types'
+import type { DecorInstance, Space, VenueMode } from '../types'
+import { normalizeVenue } from '../lib/wings'
 
 export interface Template {
   id: string
   label: string
   blurb: string
-  venue: Venue
+  /**
+   * Authored as a plain box and expanded into a one-wing venue on load. Starter
+   * scenes are all single rooms, and writing them out as wing arrays would add
+   * noise for no gain.
+   */
+  venue: { mode: VenueMode; width: number; depth: number; height: number }
   /** Params here are overrides on top of each generator's defaults. */
   items: { type: string; position: [number, number, number]; rotationY?: number; params?: Record<string, number | string> }[]
 }
@@ -107,7 +113,7 @@ export function templateSpace(template: Template): Space {
   return {
     id: crypto.randomUUID(),
     name: template.label,
-    venue: { ...template.venue },
+    venue: normalizeVenue(template.venue),
     pins: [],
     items: instantiate(template),
     // Templates ship with real-world dimensions already set.

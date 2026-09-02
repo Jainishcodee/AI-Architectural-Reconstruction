@@ -7,6 +7,7 @@ import { DecorLayer } from './DecorLayer'
 import { WalkControls } from './WalkControls'
 import { LIGHTING } from './lighting'
 import { activeSpace, useActiveSpace, useScene } from '../store/sceneStore'
+import { venueBounds, venueDepth, venueHeight, venueWidth } from '../lib/wings'
 
 function Rig() {
   const lighting = useActiveSpace((s) => s.lighting)
@@ -19,36 +20,42 @@ function Rig() {
     scene.fog = new Fog(preset.fog, 30, 140)
   }, [scene, preset.background, preset.fog])
 
-  const span = Math.max(venue.width, venue.depth)
+  // Lights follow the venue's overall extent and centre, so an L-shaped room
+  // whose bulk sits off the origin is still lit and still casts shadows.
+  const b = venueBounds(venue)
+  const cx = (b.xMin + b.xMax) / 2
+  const cz = (b.zMin + b.zMax) / 2
+  const height = venueHeight(venue)
+  const span = Math.max(venueWidth(venue), venueDepth(venue))
 
   return (
     <>
       <ambientLight intensity={preset.ambient} color={preset.ambientColor} />
       <directionalLight
-        position={[span * 0.8, venue.height * 3, span * 0.6]}
+        position={[cx + span * 0.8, height * 3, cz + span * 0.6]}
         intensity={preset.keyIntensity}
         color={preset.keyColor}
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-span}
-        shadow-camera-right={span}
-        shadow-camera-top={span}
-        shadow-camera-bottom={-span}
+        shadow-camera-left={-span * 1.2}
+        shadow-camera-right={span * 1.2}
+        shadow-camera-top={span * 1.2}
+        shadow-camera-bottom={-span * 1.2}
         shadow-bias={-0.0005}
       />
       {/* Warm practicals so evening/night read as lit rather than merely dark. */}
       {preset.practicals && (
         <>
           <pointLight
-            position={[0, venue.height * 0.8, -venue.depth * 0.25]}
-            intensity={venue.width * 2.2}
+            position={[cx, height * 0.8, cz - venueDepth(venue) * 0.25]}
+            intensity={span * 2.2}
             color="#ffb765"
             distance={span * 1.6}
             decay={2}
           />
           <pointLight
-            position={[-venue.width * 0.3, venue.height * 0.7, venue.depth * 0.3]}
-            intensity={venue.width * 1.1}
+            position={[cx - venueWidth(venue) * 0.3, height * 0.7, cz + venueDepth(venue) * 0.3]}
+            intensity={span * 1.1}
             color="#ff9a5c"
             distance={span * 1.2}
             decay={2}
@@ -76,9 +83,13 @@ function AutoFrame() {
     if (!controls || framedFor.current === epoch) return
     framedFor.current = epoch
     const { venue } = activeSpace()
-    const span = Math.max(venue.width, venue.depth)
-    camera.position.set(span * 0.9, venue.height * 1.5, span * 1.25)
-    controls.target.set(0, venue.height * 0.35, 0)
+    const b = venueBounds(venue)
+    const cx = (b.xMin + b.xMax) / 2
+    const cz = (b.zMin + b.zMax) / 2
+    const h = venueHeight(venue)
+    const span = Math.max(venueWidth(venue), venueDepth(venue))
+    camera.position.set(cx + span * 0.9, h * 1.5, cz + span * 1.25)
+    controls.target.set(cx, h * 0.35, cz)
     controls.update()
   }, [controls, camera, epoch])
 
