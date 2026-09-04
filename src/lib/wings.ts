@@ -339,35 +339,35 @@ export function wingAt(venue: Venue, x: number, z: number): Wing | undefined {
 }
 
 /**
- * Position a new wing flush against one wall of an existing one, centred on it.
+ * Position a new wing flush against one wall of an existing one.
  *
- * Centring is a starting point, not a constraint — the panel exposes position
- * and size directly, so an L is a centred attach then a nudge.
+ * The new wing always spans the host's *whole* wall, so both of its ends line up
+ * exactly with the host's corners. Only the outward projection is a free
+ * parameter — that is deliberately not something the caller can get wrong.
+ * Sizing it shorter and centring it leaves a sliver of old wall at each end, so
+ * the extension reads as starting slightly inside the room rather than at its
+ * edge. Pulling one end in to make an L is a drag on a resize nub afterwards.
  */
 export function attachedWing(
   host: Wing,
   side: WallSide,
-  size: { width: number; depth: number; height: number },
+  /** How far the new wing projects away from the shared wall, metres. */
+  extent: number,
+  height: number,
   name: string,
 ): Wing {
   const b = boundsOf(host)
-  const base = {
-    id: crypto.randomUUID(),
-    name,
-    width: size.width,
-    depth: size.depth,
-    height: size.height,
-  }
+  const base = { id: crypto.randomUUID(), name, height }
 
   switch (side) {
     case 'north':
-      return { ...base, x: host.x, z: b.zMin - size.depth / 2 }
+      return { ...base, width: host.width, depth: extent, x: host.x, z: b.zMin - extent / 2 }
     case 'south':
-      return { ...base, x: host.x, z: b.zMax + size.depth / 2 }
+      return { ...base, width: host.width, depth: extent, x: host.x, z: b.zMax + extent / 2 }
     case 'west':
-      return { ...base, x: b.xMin - size.width / 2, z: host.z }
+      return { ...base, width: extent, depth: host.depth, x: b.xMin - extent / 2, z: host.z }
     case 'east':
-      return { ...base, x: b.xMax + size.width / 2, z: host.z }
+      return { ...base, width: extent, depth: host.depth, x: b.xMax + extent / 2, z: host.z }
   }
 }
 

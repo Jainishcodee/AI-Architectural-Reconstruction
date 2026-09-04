@@ -231,16 +231,16 @@ export const useScene = create<SceneState>()(
           const host =
             sp.venue.wings.find((w) => w.id === get().activeWingId) ?? sp.venue.wings[0]
           if (!host) return
-          // A new wing starts smaller than its host and matches its height, so
-          // it reads as an extension rather than replacing the room.
+          // Spans the host's full wall so its ends sit exactly on the room's
+          // edges, and projects out by a bit over half the host's depth. Height
+          // matches, so it reads as the same room continuing.
+          const outward =
+            side === 'west' || side === 'east' ? host.width * 0.6 : host.depth * 0.6
           const wing = attachedWing(
             host,
             side,
-            {
-              width: side === 'west' || side === 'east' ? host.width * 0.6 : host.width * 0.7,
-              depth: side === 'north' || side === 'south' ? host.depth * 0.6 : host.depth * 0.7,
-              height: host.height,
-            },
+            outward,
+            host.height,
             `Wing ${sp.venue.wings.length + 1}`,
           )
           patchActive((space) => ({

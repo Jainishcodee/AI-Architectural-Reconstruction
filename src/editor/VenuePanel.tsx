@@ -1,17 +1,40 @@
 import { useRef, useState } from 'react'
 import { useActiveSpace, useScene } from '../store/sceneStore'
 import { surfacesFor } from '../lib/surfaces'
-import { overlapsAny, WALL_SIDES, type WallSide } from '../lib/wings'
+import { overlapsAny } from '../lib/wings'
 import { readFileAsDataUrl, loadImage } from '../lib/removeBg'
 import { SURFACE_LABELS, type SurfaceId } from '../types'
 import { Button, Hint, NumberField, Panel, SelectField } from './ui'
 
-/** Which way a new wing goes, in the user's terms rather than compass points. */
-const EXTEND_LABELS: Record<string, string> = {
-  north: '↑ Beyond the back',
-  south: '↓ Out the front',
-  west: '← To the left',
-  east: '→ To the right',
+/**
+ * One direction of a compass pad.
+ *
+ * Laid out spatially rather than as a list: a two-column list of the four
+ * directions puts "to the left" physically on the right of "to the right",
+ * which is exactly the sort of thing a user has to stop and decode.
+ */
+function ExtendButton({
+  arrow,
+  hint,
+  onClick,
+}: {
+  arrow: string
+  hint: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      title={`Extend ${hint}`}
+      onClick={onClick}
+      className="flex h-10 flex-col items-center justify-center rounded-md bg-[#222833] text-[#c7cdd8] transition-colors hover:bg-[#e8b04b] hover:text-[#171b22]"
+    >
+      <span className="text-sm leading-none">{arrow}</span>
+      <span className="mt-0.5 text-[8px] uppercase leading-none tracking-wide opacity-70">
+        {hint}
+      </span>
+    </button>
+  )
 }
 
 export function VenuePanel() {
@@ -139,15 +162,22 @@ export function VenuePanel() {
         {venue.mode === 'indoor' && wing && (
           <div className="mt-3 border-t border-[#262c36] pt-3">
             <p className="mb-1.5 text-[11px] text-[#9aa4b2]">
-              Extend {venue.wings.length > 1 ? wing.name.toLowerCase() : 'the room'} —
-              the shared wall opens automatically.
+              Extend {venue.wings.length > 1 ? wing.name.toLowerCase() : 'the room'}. The
+              new area meets the wall edge to edge and the shared wall opens by itself;
+              drag a nub afterwards to pull one end in for an L.
             </p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {WALL_SIDES.map((side) => (
-                <Button key={side} onClick={() => addWing(side as WallSide)}>
-                  {EXTEND_LABELS[side]}
-                </Button>
-              ))}
+            <div className="mx-auto grid w-[168px] grid-cols-3 gap-1">
+              <span />
+              <ExtendButton arrow="↑" hint="back" onClick={() => addWing('north')} />
+              <span />
+              <ExtendButton arrow="←" hint="left" onClick={() => addWing('west')} />
+              <div className="flex items-center justify-center rounded-md border border-dashed border-[#3a4250] text-[8px] uppercase tracking-wide text-[#5f6875]">
+                room
+              </div>
+              <ExtendButton arrow="→" hint="right" onClick={() => addWing('east')} />
+              <span />
+              <ExtendButton arrow="↓" hint="front" onClick={() => addWing('south')} />
+              <span />
             </div>
             {venue.wings.length > 1 && (
               <div className="mt-2 flex items-center gap-2">
