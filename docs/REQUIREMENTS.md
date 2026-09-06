@@ -87,6 +87,7 @@ makes cheap, imperfect AI usable at all.
 |---|---|---|
 | F1 | A project holds multiple named **spaces**, each with its own geometry, photos, calibration and lighting | Tabs to switch, rename, duplicate, delete |
 | F2 | Indoor (six-sided box) and outdoor (ground + backdrop) venue modes | Lawn and farmhouse events are half the market |
+| F2b | **Extend a room into an L, T or U** by adding a wing off any wall, each with its own ceiling height. Shared walls open automatically; a lower neighbour leaves a transom above the opening | Venues are rarely one clean box. Wings are axis-aligned rectangles; openings come from 1-D interval subtraction per wall |
 | F3 | Resize the room by dragging handles in the 3D view | Camera controls disabled during drag |
 | F4 | Upload photos; pin one to any wall, floor or ceiling | Shared photo pool across spaces |
 | F5 | **Correct a photo's perspective by dragging four corner handles**, re-rectifying live | GPU homography in the fragment shader |
@@ -171,6 +172,7 @@ with a professional user base.
 | Decision | Reason |
 |---|---|
 | Photos are **textures on a hand-adjusted box**, not geometry | See §4. No method reconstructs a building from sparse photos. |
+| A venue is a **list of axis-aligned rectangles**, not one box, and not a free polygon | Covers L, T and U shapes and per-area ceiling heights, while keeping the interaction "extend this wall" rather than "edit these vertices" — the target user has no CAD training. Rotation is deliberately excluded: it buys nothing and complicates the shared-wall subtraction. |
 | Perspective warp runs in the **fragment shader** | Live re-rectification at frame rate with true perspective. A CPU canvas warp is affine per triangle and creases down the diagonal. |
 | Decor is **parametric**, not downloaded models | Span/colour/density are the things decorators quote on; the BOM falls out for free; no hunt for CC0 mandap models that do not exist. |
 | Line detection is **hand-written**, not OpenCV.js | 8 MB of wasm to run an edge filter is a bad trade for an offline-first tool. |

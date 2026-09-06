@@ -32,6 +32,7 @@ client to convince.
 | | |
 |---|---|
 | **Any venue, from a photo dump** | Rough out a room, pin your photos to its walls, and correct the perspective by dragging four corners. Auto-align proposes them for you. |
+| **Rooms that turn corners** | Extend a wall left, right or forward into an L, T or U. Shared walls open automatically, and each area keeps its own ceiling height. |
 | **Decor as a first-class object** | 16 parametric generators — balloon garlands, floral arches, marigold hangings, drapes, mandaps, stages, chair rows, fairy lights — with editable span, colour and density. |
 | **A quote, not just a picture** | Every piece reports its own materials, so the bill builds itself: *240 balloons, 18 ft of garland, 6 drape panels.* Rates and margin are editable. |
 | **A whole event, not one room** | A project holds several spaces — the haldi lawn, the entrance, the reception hall — each with its own geometry, rolling up into one quote. |
@@ -69,7 +70,20 @@ you rather than guessing.
 
 ![The photo aligner, with four handles snapped onto the corners of an angled wall shot and the message "Auto-aligned from 3 detected edges"](docs/images/02-align.png)
 
-### 3 · Set the real size
+### 3 · Extend it around a corner
+
+A venue is rarely one clean box. Use the direction pad to extend **left, right,
+front or back**, and the new area joins the venue as one continuous space — it
+meets the wall edge to edge, and the shared wall opens by itself so you can walk
+straight through. Drag a resize nub afterwards to pull one end in and make an L.
+
+Each area keeps its own ceiling height, which is what makes a low entrance foyer
+opening into a high hall representable. Where the ceilings differ, the wall above
+the opening survives as a transom, exactly as it does in the real building.
+
+![An L-shaped venue: a tall sangeet hall with a lower foyer extending toward the viewer, the wall between them open below and solid above](docs/images/04-wings.png)
+
+### 4 · Set the real size
 
 Give one measurement you actually know — the back wall is 34 ft, the ceiling is
 12 ft. Everything scales with it, keeping the proportions you dialled in.
@@ -78,13 +92,13 @@ This step is not optional in spirit. You quote garland by the foot, and until
 the scene has a real dimension every quantity is a guess. The bill of materials
 says so, loudly, until you set it.
 
-### 4 · Dress it
+### 5 · Dress it
 
 Drag decor in from the library and move, rotate and tune it. Anything missing:
 upload a photo of the prop, and it drops into the scene as a background-removed
 cutout — instantly, free, and offline.
 
-### 5 · Sell it
+### 6 · Sell it
 
 **Present** hides every panel and gizmo, leaving the room, a lighting switcher,
 the headline price, and one tap to walk the client through each space.
@@ -110,6 +124,14 @@ So the photos are **textures on a hand-adjusted box**. AI proposes, the human
 corrects. That correction step is not a workaround for weak AI — it is the
 safety net that makes cheap, imperfect AI usable at all, and it is why this
 works on a WhatsApp photo dump instead of a survey.
+
+**A venue is a list of rectangles, not one box.** Real halls turn corners, and a
+foyer running into a hall has two different ceiling heights. Each wall is treated
+as a 1-D interval and the overlap with any adjoining area is subtracted, which is
+what opens the doorway between them; where the neighbour is lower, the wall above
+the opening survives as a transom. Wings are never rotated — an L, T or U is
+fully described by axis-aligned rectangles, and allowing rotation would buy
+nothing while making that subtraction far harder.
 
 **Front, back and interior are separate spaces.** A facade shot and an interior
 shot share no visible geometry; nothing can register them into one building. So
@@ -138,7 +160,7 @@ src/
   editor/     Toolbar, SpaceTabs, VenuePanel, PhotoWarper, ScaleCalibrator,
               Library, Inspector, BomPanel, PresentBar
   store/      zustand scene store (+ zundo undo), IndexedDB persistence
-  lib/        homography solver, background removal, surface frames
+  lib/        homography solver, background removal, wing geometry + openings
   templates/  four starter scenes
 docs/         REQUIREMENTS.md — full spec, market research, roadmap
 ```
